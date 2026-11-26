@@ -155,6 +155,20 @@ function parseJSON(text){
     return JSON.parse(repaired);
   }
 }
+// Ask for JSON, retrying up to three times if the reply can't be parsed.
+// Network and quota errors are not retried.
+async function askJSON(content){
+  let lastErr;
+  for(let attempt = 1; attempt <= 3; attempt++){
+    try {
+      return parseJSON(await ask(content));
+    } catch(err){
+      lastErr = err;
+      if(!/JSON/.test(err.message)) throw err;
+    }
+  }
+  throw lastErr;
+}
 const imageBlock = () => ({type:'image', source:{type:'base64', media_type:'image/jpeg', data:imageB64}});
 
 // ---- Step 2: scan holds by colour ----
@@ -166,7 +180,7 @@ If a colour is ambiguous, or the photo is too dark or blurred, say so in "notes"
 Respond with ONLY JSON, no preamble, in this shape:
 {"routes":[{"colour":"red","holds":[{"x":0.42,"y":0.77,"start":false}]}],"notes":""}`;
   try {
-    const parsed = parseJSON(await ask([imageBlock(), {type:'text', text:prompt}]));
+    const parsed = await askJSON([imageBlock(), {type:'text', text:prompt}]);
     routes = (parsed.routes||[]).filter(r => r.holds && r.holds.length);
     chosen = routes.length ? 0 : null;
     renderAll();
@@ -200,7 +214,7 @@ Give a practical, specific approach. Refer to holds by position or visual descri
 Respond with ONLY JSON, no preamble, in this shape:
 {"estimated_grade":"","confidence":"low|medium|high","summary":"","start":"","sequence":["step 1","step 2"],"crux":"","footwork":["..."],"body_position":["..."],"alternatives":"","caveats":""}`;
   try {
-    const g = parseJSON(await ask([imageBlock(), {type:'text', text:prompt}]));
+    const g = await askJSON([imageBlock(), {type:'text', text:prompt}]);
     const out = $('guide');
     const top = document.createElement('p');
     const strong = document.createElement('strong'); strong.textContent = `${r.colour} route`;
