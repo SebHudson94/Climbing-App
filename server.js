@@ -1,13 +1,13 @@
-// Minimal server: serves the front end and proxies /api/messages to the Anthropic API.
+// Minimal server: serves the front end and proxies /api/messages to the Google Gemini API.
 // The API key stays here on the server and is never sent to the browser.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
-const MAX_TOKENS = Math.min(parseInt(process.env.MAX_TOKENS || '1000', 10), 2000);
+const API_KEY = process.env.GEMINI_API_KEY;
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MAX_TOKENS = Math.min(parseInt(process.env.MAX_TOKENS || '2000', 10), 4000);
 const MAX_BODY = 10 * 1024 * 1024; // photos are downscaled client-side, so 10 MB is ample
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const TYPES = {
@@ -16,9 +16,23 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8',
 };
 
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',').map(o => o.trim()).filter(Boolean);
+
 function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'Content-Type': type });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
+}
+
+// Allow only the origins listed in ALLOWED_ORIGINS (e.g. your GitHub Pages site).
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Vary', 'Origin');
+  }
 }
 
 async function readBody(req) {
@@ -36,9 +50,18 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+// The front end sends content blocks in the form { type: 'text' | 'image', ... }.
+// Convert them to Gemini's parts format.
+function toGeminiParts(content) {
+  if (typeof content === 'string') return [{ text: content }];
+  return content.map(block => block.type === 'image'
+    ? { inline_data: { mime_type: block.source.media_type, data: block.source.data } }
+    : { text: block.text || '' });
+}
+
 async function handleMessages(req, res) {
   if (!API_KEY) {
-    return send(res, 500, { error: 'ANTHROPIC_API_KEY is not set on the server' });
+    return send(res, 500, { error: 'GEMINI_API_KEY is not set on the server' });
   }
   let input;
   try {
@@ -49,17 +72,31 @@ async function handleMessages(req, res) {
   if (!Array.isArray(input.messages)) {
     return send(res, 400, { error: 'messages array required' });
   }
+
+  const contents = input.messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: toGeminiParts(m.content),
+  }));
+
   // The client cannot choose the model or token limit: the server decides both.
-  const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`;
+  const upstream = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, messages: input.messages }),
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY },
+    body: JSON.stringify({
+      contents,
+      generationConfig: { maxOutputTokens: MAX_TOKENS, responseMimeType: 'application/json' },
+    }),
   });
-  send(res, upstream.status, await upstream.text());
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    return send(res, upstream.status, { error: (data.error && data.error.message) || 'Upstream error' });
+  }
+
+  // Return the reply in the shape the front end already reads.
+  const text = ((data.candidates && data.candidates[0] && data.candidates[0].content.parts) || [])
+    .map(p => p.text || '').join('');
+  send(res, 200, { content: [{ type: 'text', text }] });
 }
 
 function serveStatic(req, res) {
@@ -74,6 +111,11 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    applyCors(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      return res.end();
+    }
     if (req.method === 'POST' && req.url === '/api/messages') {
       return await handleMessages(req, res);
     }
@@ -89,5 +131,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Route Analyser running at http://localhost:${PORT}`);
-  if (!API_KEY) console.warn('Warning: ANTHROPIC_API_KEY is not set');
+  if (!API_KEY) console.warn('Warning: GEMINI_API_KEY is not set');
 });

@@ -1,7 +1,7 @@
 {
   "name": "route-analyser",
   "version": "0.1.0",
-  "description": "Photo-based bouldering route analysis using Claude",
+  "description": "Photo-based bouldering route analysis using Google Gemini",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
