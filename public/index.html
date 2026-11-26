@@ -147,7 +147,13 @@ function parseJSON(text){
   const clean = text.replace(/```json|```/g,'');
   const s = clean.indexOf('{'), e = clean.lastIndexOf('}');
   if(s<0 || e<0) throw new Error('No JSON in response');
-  return JSON.parse(clean.slice(s,e+1));
+  const body = clean.slice(s,e+1);
+  try { return JSON.parse(body); }
+  catch(_) {
+    // Repair common model slips: trailing commas, and missing commas between objects
+    const repaired = body.replace(/,\s*([}\]])/g,'$1').replace(/}\s*{/g,'},{');
+    return JSON.parse(repaired);
+  }
 }
 const imageBlock = () => ({type:'image', source:{type:'base64', media_type:'image/jpeg', data:imageB64}});
 
