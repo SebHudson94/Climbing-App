@@ -20,6 +20,8 @@ h2{font-size:1rem;margin:0 0 8px}
 button{font:inherit;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:12px 16px;
   width:100%;font-weight:600;cursor:pointer}
 button:disabled{opacity:.4;cursor:default}
+.hint{width:100%;padding:10px 12px;margin-bottom:10px;border-radius:10px;border:1px solid var(--border);
+  background:var(--card);color:var(--fg);font:inherit}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .chip{width:auto;padding:8px 14px;background:var(--card);color:var(--fg);border:2px solid var(--border)}
 .chip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
@@ -48,6 +50,7 @@ canvas{width:100%;height:auto;border-radius:10px;display:none;margin-top:10px}
 
 <div class="card">
   <h2>2. Scan the holds</h2>
+  <input type="text" id="hint" class="hint" placeholder="Colour to find, e.g. purple (optional)">
   <button id="scanBtn" disabled>Scan route colours</button>
   <div id="chips" class="chips"></div>
   <div id="scanStatus" class="status"></div>
@@ -174,7 +177,11 @@ const imageBlock = () => ({type:'image', source:{type:'base64', media_type:'imag
 // ---- Step 2: scan holds by colour ----
 $('scanBtn').onclick = async () => {
   setError(''); $('scanBtn').disabled = true; setStatus('scanStatus','Scanning holds…');
-  const prompt = `This is a photo of an indoor bouldering wall. Identify each distinct route colour that has holds visible in the photo.
+  const hint = $('hint').value.trim().toLowerCase();
+  const target = hint
+    ? `This is a photo of an indoor bouldering wall. Find every hold of the colour "${hint}" and report only those. Do not include other colours.`
+    : `This is a photo of an indoor bouldering wall. Identify each distinct route colour that has holds visible in the photo.`;
+  const prompt = `${target}
 For each colour, give approximate hold positions as fractions of the image: x (0 = left, 1 = right) and y (0 = top, 1 = bottom). Include every hold of that colour you can see. Mark start holds with "start": true.
 If a colour is ambiguous, or the photo is too dark or blurred, say so in "notes".
 Respond with ONLY JSON, no preamble, in this shape:
