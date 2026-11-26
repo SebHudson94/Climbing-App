@@ -2,6 +2,8 @@
 <html lang="en-GB">
 <head>
 <meta charset="UTF-8">
+<!-- Leave content empty when the server serves this page. When hosting the front end elsewhere (e.g. GitHub Pages), set it to your server URL. -->
+<meta name="api-base" content="">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Route Analyser</title>
 <style>
@@ -61,6 +63,7 @@ canvas{width:100%;height:auto;border-radius:10px;display:none;margin-top:10px}
 
 <script>
 const $ = id => document.getElementById(id);
+const API_BASE = ((document.querySelector('meta[name="api-base"]') || {}).content || '').replace(/\/$/, '');
 const canvas = $('canvas'), ctx = canvas.getContext('2d');
 const COLOUR_HEX = {red:'#ef4444',blue:'#3b82f6',green:'#22c55e',yellow:'#eab308',orange:'#f97316',
   purple:'#a855f7',pink:'#ec4899',black:'#111111',white:'#f5f5f5',grey:'#9ca3af',gray:'#9ca3af',
@@ -130,11 +133,11 @@ function renderChips(){
 }
 function renderAll(){ renderChips(); draw(); }
 
-// ---- Claude API ----
+// ---- Model API (via server proxy) ----
 async function ask(content){
-  const res = await fetch('/api/messages', {
+  const res = await fetch(API_BASE + '/api/messages', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({model:'claude-sonnet-4-6', max_tokens:1000, messages:[{role:'user',content}]})
+    body: JSON.stringify({max_tokens:1000, messages:[{role:'user',content}]})
   });
   if(!res.ok) throw new Error('Request failed (' + res.status + ')');
   const data = await res.json();
