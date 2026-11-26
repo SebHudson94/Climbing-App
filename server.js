@@ -21,7 +21,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
 
 function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'Content-Type': type });
-  res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  if (Buffer.isBuffer(body) || typeof body === 'string') return res.end(body);
+  res.end(JSON.stringify(body));
 }
 
 // Allow only the origins listed in ALLOWED_ORIGINS (e.g. your GitHub Pages site).
