@@ -25,7 +25,11 @@ button:disabled{opacity:.4;cursor:default}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .chip{width:auto;padding:8px 14px;background:var(--card);color:var(--fg);border:2px solid var(--border)}
 .chip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
-canvas{width:100%;height:auto;border-radius:10px;display:none;margin-top:10px}
+.modes{display:flex;gap:8px;margin-top:10px}
+.modes button{width:auto;flex:1;background:var(--card);color:var(--fg);border:2px solid var(--border)}
+.modes button.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent) inset}
+canvas{width:100%;height:auto;border-radius:10px;display:none;margin-top:10px;touch-action:manipulation}
+.legend{color:var(--muted);font-size:.8rem;margin:8px 0 0}
 .status{color:var(--muted);font-size:.9rem;margin-top:10px}
 .error{color:var(--err);font-size:.9rem;margin-top:10px}
 .guide h3{margin:14px 0 4px;font-size:.95rem}
@@ -57,7 +61,17 @@ canvas{width:100%;height:auto;border-radius:10px;display:none;margin-top:10px}
 </div>
 
 <div class="card">
-  <h2>3. Approach guide</h2>
+  <h2>3. Correct the holds</h2>
+  <div class="modes">
+    <button id="modeAdd" class="sel">Add / remove holds</button>
+    <button id="modeStart">Mark starts</button>
+  </div>
+  <p class="legend">Add/remove: tap an empty spot to add a hold, or tap a circle to remove it.
+  Mark starts: tap a hold to cycle one hand, both hands, then off. Double ring = start; filled centre = both hands.</p>
+</div>
+
+<div class="card">
+  <h2>4. Approach guide</h2>
   <button id="analyseBtn" disabled>Analyse selected route</button>
   <div id="guide" class="guide"></div>
   <div id="status" class="status"></div>
@@ -74,11 +88,20 @@ const COLOUR_HEX = {red:'#ef4444',blue:'#3b82f6',green:'#22c55e',yellow:'#eab308
 
 let baseImg = null;      // HTMLImageElement of the downscaled photo
 let imageB64 = null;     // base64 JPEG without data-URL prefix
-let routes = [];         // [{colour, holds:[{x,y,start}]}]
+let routes = [];         // [{colour, holds:[{x,y,start,both_hands}]}]
 let chosen = null;       // index into routes
+let mode = 'add';        // 'add' or 'start'
 
 function setError(msg){ const e=$('error'); e.textContent=msg||''; e.classList.toggle('hidden',!msg); }
 function setStatus(id,msg){ $(id).textContent = msg||''; }
+
+function setMode(m){
+  mode = m;
+  $('modeAdd').classList.toggle('sel', m==='add');
+  $('modeStart').classList.toggle('sel', m==='start');
+}
+$('modeAdd').onclick = () => setMode('add');
+$('modeStart').onclick = () => setMode('start');
 
 // ---- Photo handling: downscale to keep the API payload small ----
 $('file').onchange = e => {
@@ -115,12 +138,42 @@ function draw(){
   const rad = canvas.width * 0.022;
   ctx.lineWidth = Math.max(3, canvas.width*0.006);
   ctx.strokeStyle = col;
+  ctx.fillStyle = col;
   for(const h of r.holds){
     const x = h.x*canvas.width, y = h.y*canvas.height;
     ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.stroke();
     if(h.start){ ctx.beginPath(); ctx.arc(x,y,rad*1.6,0,Math.PI*2); ctx.stroke(); }
+    if(h.start && h.both_hands){ ctx.beginPath(); ctx.arc(x,y,rad*0.5,0,Math.PI*2); ctx.fill(); }
   }
 }
+
+// ---- Tapping the photo: add/remove holds, or mark starts ----
+canvas.addEventListener('click', e => {
+  if(chosen===null || !routes[chosen] || !baseImg) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  const holds = routes[chosen].holds;
+
+  // Find the nearest existing hold within about 24 screen pixels
+  let idx = -1, best = 24;
+  holds.forEach((h,i) => {
+    const d = Math.hypot((h.x-x)*rect.width, (h.y-y)*rect.height);
+    if(d < best){ best = d; idx = i; }
+  });
+
+  if(mode === 'add'){
+    if(idx >= 0) holds.splice(idx,1);
+    else holds.push({x, y, start:false, both_hands:false});
+  } else {
+    if(idx < 0) return;
+    const h = holds[idx];
+    if(!h.start){ h.start = true; h.both_hands = false; }
+    else if(!h.both_hands){ h.both_hands = true; }
+    else { h.start = false; h.both_hands = false; }
+  }
+  renderAll();
+});
 
 // ---- Colour chips ----
 function renderChips(){
@@ -174,7 +227,7 @@ async function askJSON(content){
 }
 const imageBlock = () => ({type:'image', source:{type:'base64', media_type:'image/jpeg', data:imageB64}});
 
-// ---- Step 2: scan holds by colour ----
+// ---- Scan holds by colour ----
 $('scanBtn').onclick = async () => {
   setError(''); $('scanBtn').disabled = true; setStatus('scanStatus','Scanning holds…');
   const hint = $('hint').value.trim().toLowerCase();
@@ -200,7 +253,7 @@ Respond with ONLY JSON, no preamble, in this shape:
   } finally { $('scanBtn').disabled = false; }
 };
 
-// ---- Step 3: approach guide ----
+// ---- Approach guide ----
 function section(parent, title, body){
   const h = document.createElement('h3'); h.textContent = title; parent.appendChild(h);
   if(Array.isArray(body)){
@@ -216,7 +269,7 @@ $('analyseBtn').onclick = async () => {
   const r = routes[chosen];
   setError(''); $('analyseBtn').disabled = true; $('guide').innerHTML=''; setStatus('status','Working out an approach…');
   const prompt = `The climber wants to attempt the ${r.colour} route shown in this photo.
-Hold positions for that route, as fractions of the image (x left→right, y top→bottom, start holds flagged): ${JSON.stringify(r.holds)}
+Hold positions for that route, as fractions of the image (x left→right, y top→bottom). Holds with "start": true are start holds. Where "both_hands" is true, that single hold is used by both hands at the start: treat it as a two-handed start. Holds were checked by the climber, so treat this list as correct: ${JSON.stringify(r.holds)}
 Give a practical, specific approach. Refer to holds by position or visual description. Use British English. Be concise. Note that the photo may not show the whole wall.
 Respond with ONLY JSON, no preamble, in this shape:
 {"estimated_grade":"","confidence":"low|medium|high","summary":"","start":"","sequence":["step 1","step 2"],"crux":"","footwork":["..."],"body_position":["..."],"alternatives":"","caveats":""}`;
